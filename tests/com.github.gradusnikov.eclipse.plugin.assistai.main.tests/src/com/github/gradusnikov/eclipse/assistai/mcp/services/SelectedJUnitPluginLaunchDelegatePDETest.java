@@ -1,6 +1,7 @@
 package com.github.gradusnikov.eclipse.assistai.mcp.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.util.List;
@@ -16,6 +17,7 @@ import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IMember;
+import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.IType;
@@ -29,7 +31,7 @@ public class SelectedJUnitPluginLaunchDelegatePDETest
 {
     private static final String TEST_PROJECT = "SelectedJUnitPluginLaunchDelegate_TestProject";
 
-    private IProject            project;
+    private IProject project;
 
     @BeforeEach
     public void createJavaProject() throws Exception
@@ -59,8 +61,13 @@ public class SelectedJUnitPluginLaunchDelegatePDETest
 
         IPackageFragmentRoot sourceRoot = javaProject.getPackageFragmentRoot( sourceFolder );
         IPackageFragment packageFragment = sourceRoot.createPackageFragment( "example.selected", true, monitor );
-        packageFragment.createCompilationUnit( "FirstPDETest.java", "package example.selected; public class FirstPDETest {}", true, monitor );
-        packageFragment.createCompilationUnit( "SecondPDETest.java", "package example.selected; public class SecondPDETest {}", true, monitor );
+        packageFragment.createCompilationUnit( "FirstPDETest.java",
+            "package example.selected; public class FirstPDETest {}", true, monitor );
+        packageFragment.createCompilationUnit( "SecondPDETest.java",
+            "package example.selected; public class SecondPDETest {}", true, monitor );
+        packageFragment.createCompilationUnit( "MultiMethodPDETest.java",
+            "package example.selected; public class MultiMethodPDETest {"
+            + " public void testAlpha() {} public void testBeta() {} }", true, monitor );
     }
 
     @AfterEach
@@ -76,18 +83,74 @@ public class SelectedJUnitPluginLaunchDelegatePDETest
     public void testEvaluateTests_resolvesEverySelectedClass() throws Exception
     {
         ILaunchConfigurationType type = DebugPlugin.getDefault().getLaunchManager()
-                .getLaunchConfigurationType( SelectedJUnitPluginLaunchDelegate.LAUNCH_CONFIGURATION_TYPE );
+            .getLaunchConfigurationType( SelectedJUnitPluginLaunchDelegate.LAUNCH_CONFIGURATION_TYPE );
         assertNotNull( type );
 
-        ILaunchConfigurationWorkingCopy configuration = type.newInstance( null, "SelectedJUnitPluginLaunchDelegatePDETest" );
+        ILaunchConfigurationWorkingCopy configuration = type.newInstance(
+            null, "SelectedJUnitPluginLaunchDelegatePDETest_multiClass" );
         configuration.setAttribute( IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, TEST_PROJECT );
         configuration.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES,
-                List.of( "example.selected.FirstPDETest", "example.selected.SecondPDETest" ) );
+            List.of( "example.selected.FirstPDETest", "example.selected.SecondPDETest" ) );
 
-        IMember[] selected = new SelectedJUnitPluginLaunchDelegate().evaluateTests( configuration, new NullProgressMonitor() );
+        IMember[] selected = new SelectedJUnitPluginLaunchDelegate().evaluateTests(
+            configuration, new NullProgressMonitor() );
 
         assertEquals( 2, selected.length );
+        assertInstanceOf( IType.class, selected[0] );
+        assertInstanceOf( IType.class, selected[1] );
         assertEquals( "example.selected.FirstPDETest", ( (IType) selected[0] ).getFullyQualifiedName() );
         assertEquals( "example.selected.SecondPDETest", ( (IType) selected[1] ).getFullyQualifiedName() );
+    }
+
+    @Test
+    public void testEvaluateTests_singleMethod_returnsIMethod() throws Exception
+    {
+        // When ATTR_TEST_METHOD is set with a single class, evaluateTests must return
+        // exactly one IMethod so JDT's runner scopes execution to that method only.
+        ILaunchConfigurationType type = DebugPlugin.getDefault().getLaunchManager()
+            .getLaunchConfigurationType( SelectedJUnitPluginLaunchDelegate.LAUNCH_CONFIGURATION_TYPE );
+        assertNotNull( type );
+
+        ILaunchConfigurationWorkingCopy configuration = type.newInstance(
+            null, "SelectedJUnitPluginLaunchDelegatePDETest_singleMethod" );
+        configuration.setAttribute( IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, TEST_PROJECT );
+        configuration.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES,
+            List.of( "example.selected.MultiMethodPDETest" ) );
+        configuration.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_METHOD, "testAlpha" );
+
+        IMember[] selected = new SelectedJUnitPluginLaunchDelegate().evaluateTests(
+            configuration, new NullProgressMonitor() );
+
+        assertEquals( 1, selected.length,
+            "Expected exactly one member for single-method selection" );
+        assertInstanceOf( IMethod.class, selected[0],
+            "Expected an IMethod, not an IType, so the runner isolates the single method" );
+        assertEquals( "testAlpha", selected[0].getElementName() );
+    }
+
+    @Test
+    public void testEvaluateTests_singleClass_noMethod_returnsIType() throws Exception
+    {
+        // A single class without ATTR_TEST_METHOD falls through to the multi-class path
+        // and must return an IType (whole-class execution).
+        ILaunchConfigurationType type = DebugPlugin.getDefault().getLaunchManager()
+            .getLaunchConfigurationType( SelectedJUnitPluginLaunchDelegate.LAUNCH_CONFIGURATION_TYPE );
+        assertNotNull( type );
+
+        ILaunchConfigurationWorkingCopy configuration = type.newInstance(
+            null, "SelectedJUnitPluginLaunchDelegatePDETest_singleClass" );
+        configuration.setAttribute( IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, TEST_PROJECT );
+        configuration.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES,
+            List.of( "example.selected.MultiMethodPDETest" ) );
+        // No ATTR_TEST_METHOD → whole-class run
+
+        IMember[] selected = new SelectedJUnitPluginLaunchDelegate().evaluateTests(
+            configuration, new NullProgressMonitor() );
+
+        assertEquals( 1, selected.length );
+        assertInstanceOf( IType.class, selected[0],
+            "Expected an IType for whole-class execution" );
+        assertEquals( "example.selected.MultiMethodPDETest",
+            ( (IType) selected[0] ).getFullyQualifiedName() );
     }
 }

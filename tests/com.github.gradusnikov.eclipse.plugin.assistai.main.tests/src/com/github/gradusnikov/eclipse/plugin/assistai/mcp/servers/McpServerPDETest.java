@@ -104,6 +104,8 @@ public class McpServerPDETest
 
     // -----------------------------------------------------------------------
     // runJUnitPluginTests — unified entry point
+    // params: projectName, className, methodName, packageName, timeout,
+    //         withCoverage, includeAllPlugins, additionalBundles, launcherName
     // -----------------------------------------------------------------------
 
     @Test
@@ -113,7 +115,7 @@ public class McpServerPDETest
         {
             // no className/packageName → runs all tests in project
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, null, null, null, null, null, null );
+                "NonExistentProject_XYZ", null, null, null, null, null, null, null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -130,7 +132,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, null, "30", null, null, null, null );
+                "NonExistentProject_XYZ", null, null, null, "30", null, null, null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -147,7 +149,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, null, "10", null, "true", null, null );
+                "NonExistentProject_XYZ", null, null, null, "10", null, "true", null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -164,7 +166,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, null, "10", null, "false", null, null );
+                "NonExistentProject_XYZ", null, null, null, "10", null, "false", null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -181,7 +183,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, null, "10", null, "false",
+                "NonExistentProject_XYZ", null, null, null, "10", null, "false",
                 "org.eclipse.core.runtime,org.eclipse.ui", null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
@@ -199,7 +201,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", "com.example.MyTest", null, null, null, null, null, null );
+                "NonExistentProject_XYZ", "com.example.MyTest", null, null, null, null, null, null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -216,7 +218,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", "com.example.MyTest", null, "10", null, "true", null, null );
+                "NonExistentProject_XYZ", "com.example.MyTest", null, null, "10", null, "true", null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );
@@ -233,7 +235,7 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", "com.example.MyTest", null, "10", null, "false",
+                "NonExistentProject_XYZ", "com.example.MyTest", null, null, "10", null, "false",
                 "org.eclipse.core.runtime, org.eclipse.ui", null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
@@ -251,7 +253,7 @@ public class McpServerPDETest
         // comma-only className → parseCommaSeparated returns empty list → rejected by PDEService
         assertThrows( IllegalArgumentException.class,
             () -> server.runJUnitPluginTests(
-                "SomeProject", " , ", null, null, null, null, null, null ) );
+                "SomeProject", " , ", null, null, null, null, null, null, null ) );
     }
 
     @Test
@@ -260,7 +262,7 @@ public class McpServerPDETest
         String result = server.runJUnitPluginTests(
             "NonExistentProject_XYZ",
             " com.example.FirstPDETest, com.example.SecondPDETest ",
-            null, "10", null, "false", "org.eclipse.ui, org.eclipse.core.runtime", null );
+            null, null, "10", null, "false", "org.eclipse.ui, org.eclipse.core.runtime", null );
 
         assertTrue( result.startsWith( "Error" ), result );
     }
@@ -271,7 +273,68 @@ public class McpServerPDETest
         try
         {
             String result = server.runJUnitPluginTests(
-                "NonExistentProject_XYZ", null, "com.example.tests", "10", null, null, null, null );
+                "NonExistentProject_XYZ", null, null, "com.example.tests", "10", null, null, null, null );
+            assertNotNull( result );
+            assertTrue( result.startsWith( "Error" ),
+                "Expected error for non-existent project, got: " + result );
+        }
+        catch ( IllegalStateException e )
+        {
+            assumeTrue( false, "Skipping: workspace not available (" + e.getMessage() + ")" );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // methodName routing
+    // -----------------------------------------------------------------------
+
+    @Test
+    public void testStartJUnitPluginTestRun_singleMethod_routesToRunJUnitPluginTestMethod()
+    {
+        // className + methodName → delegates to pdeService.runJUnitPluginTestMethod
+        // Non-existent project produces an error, confirming the routing reached the service.
+        try
+        {
+            String result = server.runJUnitPluginTests(
+                "NonExistentProject_XYZ", "com.example.MyTest", "testSomething",
+                null, "10", null, null, null, null );
+            assertNotNull( result );
+            assertTrue( result.startsWith( "Error" ),
+                "Expected error for non-existent project, got: " + result );
+        }
+        catch ( IllegalStateException e )
+        {
+            assumeTrue( false, "Skipping: workspace not available (" + e.getMessage() + ")" );
+        }
+    }
+
+    @Test
+    public void testStartJUnitPluginTestRun_methodName_withMultipleClasses_isRejected()
+    {
+        // methodName combined with comma-separated classNames must return an error message,
+        // not throw, since the check happens inside the routing block.
+        String result = server.runJUnitPluginTests(
+            "NonExistentProject_XYZ",
+            "com.example.FirstTest, com.example.SecondTest",
+            "testSomething",
+            null, "10", null, null, null, null );
+        assertNotNull( result );
+        assertTrue( result.startsWith( "Error" ),
+            "Expected error when methodName is combined with multiple classNames, got: " + result );
+        assertTrue( result.contains( "exactly one className" ),
+            "Error message should mention 'exactly one className', got: " + result );
+    }
+
+    @Test
+    public void testStartJUnitPluginTestRun_methodName_withoutClassName_isIgnored()
+    {
+        // methodName without className falls through to the package/all-tests branch.
+        // The package name wins and produces an error about the non-existent project.
+        try
+        {
+            String result = server.runJUnitPluginTests(
+                "NonExistentProject_XYZ", null, "testSomething", "com.example.tests",
+                "10", null, null, null, null );
             assertNotNull( result );
             assertTrue( result.startsWith( "Error" ),
                 "Expected error for non-existent project, got: " + result );

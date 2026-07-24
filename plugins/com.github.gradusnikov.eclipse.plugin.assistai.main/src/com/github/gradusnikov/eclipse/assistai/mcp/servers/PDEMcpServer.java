@@ -95,6 +95,10 @@ public class PDEMcpServer
                            + "If omitted, runs all tests or the packageName scope.",
                        required = false)
             String className,
+            @ToolParam(name = "methodName",
+                       description = "The test method name (e.g. 'testCreate'). Requires a single className.",
+                       required = false)
+            String methodName,
             @ToolParam(name = "packageName",
                        description = "The fully qualified package name (e.g. 'com.example.service'). "
                            + "Ignored if className is set.",
@@ -131,7 +135,17 @@ public class PDEMcpServer
         boolean allPlugins = Optional.ofNullable(includeAllPlugins).map(Boolean::parseBoolean).orElse(false);
         List<String> extras = parseCommaSeparated(additionalBundles);
 
-        if ( className != null && !className.isBlank() )
+        if ( className != null && !className.isBlank()
+             && methodName != null && !methodName.isBlank() )
+        {
+            List<String> classes = parseCommaSeparated( className );
+            if ( classes.size() != 1 )
+                return "Error: methodName requires exactly one className.";
+            return pdeService.runJUnitPluginTestMethod(
+                projectName, classes.get( 0 ), methodName,
+                timeoutSeconds, coverage, allPlugins, extras, launcherName );
+        }
+        else if ( className != null && !className.isBlank() )
         {
             List<String> classes = parseCommaSeparated( className );
             if (classes.size() == 1)

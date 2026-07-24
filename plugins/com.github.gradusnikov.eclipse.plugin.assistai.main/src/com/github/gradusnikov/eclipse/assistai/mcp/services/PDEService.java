@@ -325,6 +325,51 @@ public class PDEService
     }
 
     /**
+     * Runs a single JUnit Plug-in Test method.
+     */
+    public String runJUnitPluginTestMethod( String projectName, String className, String methodName,
+                                             Integer timeout )
+    {
+        return runJUnitPluginTestMethod( projectName, className, methodName, timeout, false, false, List.of(), null );
+    }
+
+    /**
+     * Runs a single JUnit Plug-in Test method, optionally using a saved launch configuration as a base.
+     *
+     * @param launcherName optional saved launch config name; when set all its settings are
+     *                     reused and only the project/class/method targeting attributes are overridden
+     */
+    public String runJUnitPluginTestMethod( String projectName, String className, String methodName,
+                                             Integer timeout, boolean withCoverage,
+                                             boolean includeAllPlugins, List<String> additionalBundles,
+                                             String launcherName )
+    {
+        Objects.requireNonNull( projectName, "Project name cannot be null" );
+        Objects.requireNonNull( className, "Class name cannot be null" );
+        Objects.requireNonNull( methodName, "Method name cannot be null" );
+        if ( timeout == null || timeout <= 0 )
+        {
+            timeout = 300;
+        }
+
+        try
+        {
+            IJavaProject javaProject = getJavaProject( projectName );
+            IType type = javaProject.findType( className );
+            if ( type == null )
+            {
+                return "Error: Class '" + className + "' not found in project '" + projectName + "'.";
+            }
+            return launchJUnitPluginTests( javaProject, null, List.of( type ), methodName, timeout,
+                withCoverage, includeAllPlugins, additionalBundles, launcherName );
+        }
+        catch ( IllegalArgumentException | CoreException e )
+        {
+            return "Error running plug-in tests: " + e.getMessage();
+        }
+    }
+
+    /**
      * Runs selected JUnit Plug-in Test classes in a single PDE launch.
      */
     public String runJUnitPluginTestClasses( String projectName, List<String> classNames,
@@ -496,7 +541,7 @@ public class PDEService
                                             List<IType> testClasses, int timeout, boolean withCoverage,
                                             boolean includeAllPlugins, List<String> additionalBundles )
     {
-        return launchJUnitPluginTests( javaProject, packageFragment, testClasses, timeout,
+        return launchJUnitPluginTests( javaProject, packageFragment, testClasses, null, timeout,
             withCoverage, includeAllPlugins, additionalBundles, null );
     }
 
@@ -508,6 +553,20 @@ public class PDEService
                                             List<IType> testClasses, int timeout, boolean withCoverage,
                                             boolean includeAllPlugins, List<String> additionalBundles,
                                             String launcherName )
+    {
+        return launchJUnitPluginTests( javaProject, packageFragment, testClasses, null, timeout,
+            withCoverage, includeAllPlugins, additionalBundles, launcherName );
+    }
+
+    /**
+     * Core PDE JUnit launch. When {@code launcherName} is non-null, that saved configuration is
+     * used as a base and only the test targeting attributes are overridden.
+     * When {@code methodName} is non-null, only that single test method is executed.
+     */
+    private String launchJUnitPluginTests( IJavaProject javaProject, IPackageFragment packageFragment,
+                                            List<IType> testClasses, String methodName, int timeout,
+                                            boolean withCoverage, boolean includeAllPlugins,
+                                            List<String> additionalBundles, String launcherName )
     {
         CountDownLatch latch = new CountDownLatch( 1 );
         UnitTestService.TestRunResult[] testRunResults = new UnitTestService.TestRunResult[1];
@@ -578,7 +637,9 @@ public class PDEService
             else
             {
                 boolean selectedClassLaunch = testClasses.size() > 1;
-                String launchTypeId = selectedClassLaunch
+                boolean singleMethodLaunch = testClasses.size() == 1
+                    && methodName != null && !methodName.isBlank();
+                String launchTypeId = ( selectedClassLaunch || singleMethodLaunch )
                     ? SelectedJUnitPluginLaunchDelegate.LAUNCH_CONFIGURATION_TYPE
                     : "org.eclipse.pde.ui.JunitLaunchConfig";
                 ILaunchConfigurationType type = launchManager.getLaunchConfigurationType( launchTypeId );
@@ -590,7 +651,7 @@ public class PDEService
                         + "' not found. Ensure the required PDE launcher is available.";
                 }
 
-                String launchName = buildLaunchName( javaProject, packageFragment, testClasses );
+                String launchName = buildLaunchName( javaProject, packageFragment, testClasses, methodName );
                 ILaunchConfiguration existing = findExistingLaunchConfig( launchManager, launchName );
                 if ( existing != null )
                 {
@@ -607,12 +668,25 @@ public class PDEService
                 javaProject.getElementName() );
 
             boolean selectedClassLaunch = testClasses.size() > 1;
+            boolean singleMethodLaunch = testClasses.size() == 1
+                && methodName != null && !methodName.isBlank();
             if ( selectedClassLaunch )
             {
                 List<String> classNames = testClasses.stream()
                     .map( IType::getFullyQualifiedName )
                     .toList();
                 workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES, classNames );
+                workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_METHOD, "" );
+                workingCopy.setAttribute( IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, "" );
+                workingCopy.setAttribute( "org.eclipse.jdt.junit.CONTAINER", "" );
+            }
+            else if ( singleMethodLaunch )
+            {
+                // Use SelectedJUnitPluginLaunchDelegate to return an IMethod from evaluateTests,
+                // giving JDT's runner true single-method isolation.
+                List<String> classNames = List.of( testClasses.get( 0 ).getFullyQualifiedName() );
+                workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES, classNames );
+                workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_METHOD, methodName );
                 workingCopy.setAttribute( IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, "" );
                 workingCopy.setAttribute( "org.eclipse.jdt.junit.CONTAINER", "" );
             }
@@ -620,6 +694,7 @@ public class PDEService
             {
                 workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_CLASSES,
                     List.<String>of() );
+                workingCopy.setAttribute( SelectedJUnitPluginLaunchDelegate.ATTR_TEST_METHOD, "" );
                 workingCopy.setAttribute( IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME,
                     testClasses.get( 0 ).getFullyQualifiedName() );
                 workingCopy.setAttribute( "org.eclipse.jdt.junit.CONTAINER", "" );
@@ -652,7 +727,7 @@ public class PDEService
                 workingCopy.setAttribute( "org.eclipse.jdt.junit.TEST_KIND",
                     detectJUnitTestKind( javaProject ) );
 
-                String launchName = buildLaunchName( javaProject, packageFragment, testClasses );
+                String launchName = buildLaunchName( javaProject, packageFragment, testClasses, methodName );
                 String testWorkspace = System.getProperty( "java.io.tmpdir" )
                     + java.io.File.separator + "pde-test-workspace-"
                     + javaProject.getElementName() + "-"
@@ -816,15 +891,26 @@ public class PDEService
 
     private String buildLaunchName( IJavaProject project, List<IType> testClasses )
     {
-        return buildLaunchName( project, null, testClasses );
+        return buildLaunchName( project, null, testClasses, null );
     }
 
     private String buildLaunchName( IJavaProject project, IPackageFragment pkg, List<IType> testClasses )
     {
+        return buildLaunchName( project, pkg, testClasses, null );
+    }
+
+    private String buildLaunchName( IJavaProject project, IPackageFragment pkg, List<IType> testClasses,
+                                     String methodName )
+    {
         String base = "AssistAI-PDE-" + project.getElementName();
         if ( testClasses.size() == 1 )
         {
-            return base + "-" + testClasses.get( 0 ).getElementName();
+            String name = base + "-" + testClasses.get( 0 ).getElementName();
+            if ( methodName != null && !methodName.isBlank() )
+            {
+                name += "-" + methodName;
+            }
+            return name;
         }
         if ( testClasses.size() > 1 )
         {
